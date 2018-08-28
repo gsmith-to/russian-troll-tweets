@@ -17,14 +17,25 @@ import time
 #   'external_author_id' field: as of 27-Aug-2018 this is integer type,
 #    up to 18 digits; have changed it to 'integer' (sqlite3 supports up to
 #    64 bits for integer).
+#   'tco{1,2,3}_step1' fields are combined to 'tco_step1' which is a blank-separated concat
+#    of the non-empty urls.
+#   'article_url' and the tco urls have commonly used prefixes abbreviated as described below.
+#    (This can be disabled).
 #
-# Indices are added on: author, region, language, publish_time, and account_type.
+# Indices are added on: author, region, language, publish_time, account_type, alt_external_id, tweet_id.
 # This typically takes a few minutes to run.
 #
-# NOTE: Resulting db file is about 1.1GB (it will be smaller if you remove indices).
-# However, sqlitebrowser uses nearly 5GB of RAM just to open it. Apparently sqlitebrowser is
+# NOTE: Resulting db file is about 1.6GB (it will be smaller if you remove indices).
+# However, sqlitebrowser uses > 5GB of RAM just to open it. Apparently sqlitebrowser is
 # not well designed to cope with large databases...
 # 
+# Optional URL prefix shortening applied to fields article_url, tco1_step1, tco2_step2, tco2_step3:
+#   - prefix of https://twitter.com/        replaced with @T/
+#   - prefix of http://twitter.com/         replaced with @t/
+#   - else prefix of https://         replaced with @H/
+#   - else prefix of http://          replaced with @h/
+#
+ShortenUrlPrefix = True
 
 re_date = re.compile(r"\s*(\d+)/(\d+)/(\d+)\s+(\d+):(\d+)\s*")
 
@@ -58,46 +69,86 @@ def copy_to_db( infilenames, outfilename):
     # Create table
     c.execute('''CREATE TABLE tweets (
         external_author_id	integer, ''' # 'integer is up to 64 bits in sqlite3
-  '''   author  text,
-        content text,
-        region  text,
-        language text,
-        publish_date text,
-        publish_time integer,
-        harvested_date text,
-        following integer,
-        followers integer,
-        updates integer,
-        post_type text,
-        account_type text,
-        retweet integer,
-        account_category text,
-        new_june_2018 integer)''')
+  '''   author              text,
+        content             text,
+        region              text,
+        language            text,
+        publish_date        text,
+        publish_time        integer,
+        harvested_date      text,
+        following           integer,
+        followers           integer,
+        updates             integer,
+        post_type           text,
+        account_type        text,
+        retweet             integer,
+        account_category    text,
+        new_june_2018       integer,
+        alt_external_id     integer,
+        tweet_id            integer,
+        article_url         text,
+        tco_step1           text
+    )''')
     c.execute("CREATE INDEX tweet_author ON tweets( author )")
     c.execute("CREATE INDEX tweet_region ON tweets( region )")
     c.execute("CREATE INDEX tweet_language ON tweets( language )")
     c.execute("CREATE INDEX tweet_time ON tweets( publish_time )")
     c.execute("CREATE INDEX tweet_account_type ON tweets( account_type )")
+    c.execute("CREATE INDEX tweet_alt_external_id ON tweets( alt_external_id )")
+    c.execute("CREATE INDEX tweet_tweed_id ON tweets( tweet_id )")
 
 
     fields = ("external_author_id author content region language publish_date publish_time "
         "harvested_date following followers updates post_type account_type retweet "
-        "account_category new_june_2018").split()
+        "account_category new_june_2018 alt_external_id tweet_id article_url tco_step1").split()
 
     cmd = "INSERT INTO tweets VALUES (" + ("?,"*len(fields))[:-1] + ")"
 
     n = 0
     for fn in infilenames:
+        print "file %s; %d so far" %( fn,n)
         with open(fn) as csvfile:
             reader = csv.DictReader( csvfile)
             for rec in reader:
+                urls = convert_urls( [rec['article_url'],rec['tco1_step1'],rec['tco2_step1'],rec['tco3_step1']])
+                rec['article_url'] = urls[0]
+                rec['tco_step1'] = combine_tco(urls[1:4])
                 rec['publish_date'],rec['publish_time'] = convert_date( rec['publish_date'])
                 rec['harvested_date'] = convert_date( rec['harvested_date'],only_reformat=True)
                 rec['content'] = codecs.decode( rec['content'],'utf_8')
-                c.execute( cmd, [ rec[x] for x in fields] )
+                out_fields = [ rec[x] for x in fields]
+                try:
+                    c.execute( cmd, out_fields  )
+                except Exception:
+                    print out_fields
+                    raise
                 n += 1
     conn.commit()
-    print "%d records copied to %s" % (n, outfilename )
+    print "%d records copied to %s from %d source files" % (n, outfilename, len(infilenames) )
+
+def convert_urls(urls):
+    res = []
+    for u in urls:
+        if ShortenUrlPrefix:
+           u = shorten_url_prefix(u)
+        u = codecs.decode(u, 'utf_8')
+        res.append(u)
+    return res
+
+def shorten_url_prefix(s):
+    if s.startswith('https://'):
+        if s[8:20] == 'twitter.com/':
+            return '@T/' + s[20:]
+        return '@H/'+s[8:]
+    if s.startswith('http://'):
+        if s[7:19] == 'twitter.com/':
+            return '@t/' + s[19:]
+        return '@h/'+s[7:]
+    return s
+
+def combine_tco( tlst ):
+    return ' '.join( filter( None, tlst))
+
 
 infnames = [ "IRAhandle_tweets_%d.csv" % k for k in range(1,13+1)]
 
