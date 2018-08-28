@@ -5,7 +5,7 @@ import os
 import re
 import time
 
-#   Read IRAhandle_tweets_1.csv through IRAhandle_tweets_9.csv
+#   Read IRAhandle_tweets_1.csv through IRAhandle_tweets_13.csv
 #   and generate sqlite database IRAhandle_tweets.db
 #
 # fields are the same, noting
@@ -13,10 +13,10 @@ import time
 #   'publish_date' and 'harvested_date' are reformatted to yyyy/mm/dd hh:mm
 #    so that string compares will work.
 #   'publish_time' is added; this is publish_date converted to seconds.
-#     I'm assuming the times in the csv are all UTC (pending issue #9)
-#   'external_author_id' field is a mix of large integers, and large
-#    floats like 8.90000000000e+17
-#     Have left it as text.
+#     The times in the csv are all UTC (confirmed, issue #9)
+#   'external_author_id' field: as of 27-Aug-2018 this is integer type,
+#    up to 18 digits; have changed it to 'integer' (sqlite3 supports up to
+#    64 bits for integer).
 #
 # Indices are added on: author, region, language, publish_time, and account_type.
 # This typically takes a few minutes to run.
@@ -57,8 +57,8 @@ def copy_to_db( infilenames, outfilename):
     c.execute( "pragma encoding='UTF-8';")
     # Create table
     c.execute('''CREATE TABLE tweets (
-        external_author_id	text,
-        author  text,
+        external_author_id	integer, ''' # 'integer is up to 64 bits in sqlite3
+  '''   author  text,
         content text,
         region  text,
         language text,
@@ -99,7 +99,7 @@ def copy_to_db( infilenames, outfilename):
     conn.commit()
     print "%d records copied to %s" % (n, outfilename )
 
-infnames = [ "IRAhandle_tweets_%d.csv" % k for k in range(1,10)] 
+infnames = [ "IRAhandle_tweets_%d.csv" % k for k in range(1,13+1)]
 
 copy_to_db(infnames,"IRAhandle_tweets.db")
 
